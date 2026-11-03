@@ -1,6 +1,5 @@
-import { auth, db, storage, firebaseReady, isLocalFallbackError } from '../config/firebase-config.js';
+import { auth, db, firebaseReady, isLocalFallbackError } from '../config/firebase-config.js';
 import { addDoc, collection, getDoc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, doc, getDocs, where, writeBatch } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
-import { ref, uploadBytes, getBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
 
 const api = window.SmartNotes ||= {};
 const ext = name => name.split('.').pop().toLowerCase();
@@ -127,22 +126,50 @@ const makeThumbnail = async file => {
   return '';
 };
 const mapNoteSnapshot = docSnap => { const data = docSnap.data(); return { ...data, localId: data.id || docSnap.id, id: docSnap.id, firestoreDocId: docSnap.id }; };
-// Cloud Storage path is owner-scoped so storage.rules can check the uid in the path.
+// File bytes go to Backblaze B2 via short-lived links from /api/files. Returns the stored key, or '' to fall back to chunks.
 const safeStorageName = name => sanitizeText(name, 180).replace(/[\/\\"]/g, '_') || 'file';
+const idToken = async () => auth?.currentUser?.getIdToken();
 async function uploadToStorage(uid, noteId, file) {
-  if (!storage) return '';
-  const path = `notes/${uid}/${noteId}/${safeStorageName(file.name)}`;
   try {
-    await uploadBytes(ref(storage, path), file, { contentType: file.type || 'application/octet-stream', contentDisposition: 'attachment' });
-    return path;
+    const token = await idToken();
+    if (!token) return '';
+    const response = await fetch('/api/files?action=upload-url', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteId, fileName: safeStorageName(file.name), size: file.size, contentType: file.type || 'application/octet-stream' })
+    });
+    if (!response.ok) throw new Error(`Upload link request failed (HTTP ${response.status})`);
+    const { key, url, headers } = await response.json();
+    const put = await fetch(url, { method: 'PUT', headers, body: file });
+    if (!put.ok) throw new Error(`Storage rejected the upload (HTTP ${put.status})`);
+    return key;
   } catch (error) {
-    console.warn('Storage upload unavailable; saving file as Firestore chunks instead.', error);
+    console.warn('File storage unavailable; saving file as Firestore chunks instead.', error);
     return '';
   }
 }
 async function removeStoredFile(path) {
-  if (!storage || !path) return;
-  try { await deleteObject(ref(storage, path)); } catch (error) { console.warn('Could not remove stored file.', error); }
+  if (!path) return;
+  try {
+    const token = await idToken();
+    const response = await fetch('/api/files?action=delete-url', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: path })
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { url } = await response.json();
+    await fetch(url, { method: 'DELETE' });
+  } catch (error) { console.warn('Could not remove stored file.', error); }
+}
+async function getStoredBytes(path) {
+  const token = await idToken();
+  const response = await fetch(`/api/files?action=download-url&key=${encodeURIComponent(path)}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error('File could not be loaded.');
+  const { url } = await response.json();
+  const file = await fetch(url);
+  if (!file.ok) throw new Error('File could not be downloaded.');
+  return new Uint8Array(await file.arrayBuffer());
 }
 export async function uploadNote(file, metadata = {}) {
   if (!activeUser()) throw new Error('Sign in to upload notes.');
@@ -272,10 +299,7 @@ const loadMammoth = () => {
   return mammothPromise;
 };
 const getNoteBytes = async note => {
-  if (note.storagePath) {
-    if (!storage) throw new Error("File storage is unavailable right now.");
-    return new Uint8Array(await getBytes(ref(storage, note.storagePath)));
-  }
+  if (note.storagePath) return getStoredBytes(note.storagePath);
   return base64Bytes(await getNoteDataUrl(note));
 };
 const renderPdfPages = async (bytes, body) => {
@@ -374,7 +398,7 @@ async function getChunkedDataUrl(note) { const cacheKey = note.firestoreDocId ||
 export async function getNoteDataUrl(note) { if (note.fileDataUrl) return note.fileDataUrl; if (note.isChunked || note.storageMode === 'chunks' || note.chunkCount || note.chunks) return getChunkedDataUrl(note); throw new Error('This earlier test note has no attached file data. Please re-upload the file to test downloading.'); }
 async function findNote(noteIdOrNote) { if (typeof noteIdOrNote !== 'string') return noteIdOrNote; const found = currentNotes.find(note => note.id === noteIdOrNote || note.localId === noteIdOrNote) || readNotes().find(note => note.id === noteIdOrNote || note.localId === noteIdOrNote); if (found) return found; const cached = await readLocalFile(noteIdOrNote); if (cached) return { id: noteIdOrNote, fileDataUrl: cached }; if (!localMode) { const snapshot = await getDoc(doc(db, 'notes', noteIdOrNote)); if (snapshot.exists()) return mapNoteSnapshot(snapshot); const realDocId = await resolveFirestoreDocId(noteIdOrNote); if (realDocId) return mapNoteSnapshot(await getDoc(doc(db, 'notes', realDocId))); } throw new Error('This earlier test note has no attached file data. Please re-upload the file to test downloading.'); }
 const base64Bytes = value => Uint8Array.from(atob(String(value).split(',').pop().replace(/\s/g, '')), character => character.charCodeAt(0));
-export async function downloadNoteFile(noteIdOrNote) { if (!activeUser()) throw new Error('Sign in before downloading notes.'); const note = await findNote(noteIdOrNote); if (note.storagePath) { if (!storage) throw new Error('File storage is unavailable right now. Please try again later.'); const url = await getDownloadURL(ref(storage, note.storagePath)); const anchor = document.createElement('a'); anchor.href = url; anchor.rel = 'noopener'; document.body.append(anchor); anchor.click(); anchor.remove(); return; } const dataUrl = await getNoteDataUrl(note); const blob = new Blob([base64Bytes(dataUrl)], { type: note.mimeType || note.contentType || 'application/pdf' }); const blobUrl = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = blobUrl; anchor.download = note.fileName || note.title || `${note.id || 'note'}.${note.fileExt || note.extension || 'pdf'}`; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(blobUrl), 10000); }
+export async function downloadNoteFile(noteIdOrNote) { if (!activeUser()) throw new Error('Sign in before downloading notes.'); const note = await findNote(noteIdOrNote); if (note.storagePath) { const bytes = await getStoredBytes(note.storagePath); const blob = new Blob([bytes], { type: note.mimeType || note.contentType || 'application/octet-stream' }); const blobUrl = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = blobUrl; anchor.download = note.fileName || note.title || 'note'; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(blobUrl), 10000); return; } const dataUrl = await getNoteDataUrl(note); const blob = new Blob([base64Bytes(dataUrl)], { type: note.mimeType || note.contentType || 'application/pdf' }); const blobUrl = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = blobUrl; anchor.download = note.fileName || note.title || `${note.id || 'note'}.${note.fileExt || note.extension || 'pdf'}`; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(blobUrl), 10000); }
 export async function downloadNote(note, callback) { try { await downloadNoteFile(note); callback?.(null); } catch (error) { callback?.(error); throw error; } }
 export async function deleteNote(note) {
   const user = activeUser();
