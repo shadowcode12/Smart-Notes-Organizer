@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { before, after, afterEach, test } from 'node:test';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
 import {
+  addDoc,
+  collection,
+  getDocs,
   doc,
   setDoc,
   getDoc,
@@ -173,4 +176,14 @@ test('thumbnails are optional but limited to 100000 characters', async () => {
     setDoc(doc(uploader, 'notes/t2'), { ...note(), thumbnail: 'x'.repeat(100001) })
   );
   await assertFails(setDoc(doc(uploader, 'notes/t3'), { ...note(), thumbnail: 12345 }));
+});
+test("users can file reports but cannot read or edit them", async () => {
+  const reporter = user("reporter");
+  const valid = { reporterId: "reporter", noteId: "n1", reason: "Spam", createdAt: new Date() };
+  await assertSucceeds(addDoc(collection(reporter, "reports"), valid));
+  await assertFails(addDoc(collection(reporter, "reports"), { ...valid, reporterId: "someone-else" }));
+  await assertFails(addDoc(collection(reporter, "reports"), { ...valid, reason: "" }));
+  await assertFails(addDoc(collection(reporter, "reports"), { ...valid, extra: true }));
+  await assertFails(addDoc(collection(anon(), "reports"), { ...valid, reporterId: "" }));
+  await assertFails(getDocs(collection(reporter, "reports")));
 });
