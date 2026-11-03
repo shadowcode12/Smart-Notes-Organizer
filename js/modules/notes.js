@@ -18,6 +18,22 @@ const isSampleNote = note => note?.isSample === true || note?.sample === true ||
 const readNotes = () => { try { return (JSON.parse(localStorage.getItem(NOTES_KEY)) || []).filter(note => !isSampleNote(note)); } catch { return []; } };
 const saveNotes = notes => localStorage.setItem(NOTES_KEY, JSON.stringify(notes.filter(note => !isSampleNote(note))));
 const activeUser = () => localMode ? api.auth?.currentUser?.() : auth?.currentUser;
+const backendUrl = String(window.SMART_NOTES_BACKEND_URL || '').replace(/\/$/, '');
+const backendConfigured = Boolean(backendUrl);
+const backendRequest = async (path, options = {}) => {
+  const user = activeUser();
+  const token = user?.getIdToken ? await user.getIdToken() : '';
+  const headers = new Headers(options.headers || {});
+  headers.set('Content-Type', 'application/json');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${backendUrl}${path}`, { ...options, headers });
+  if (!response.ok) {
+    let detail = `Backend request failed (${response.status}).`;
+    try { detail = (await response.json()).detail || detail; } catch { /* non-JSON error */ }
+    throw new Error(detail);
+  }
+  return response.status === 204 ? null : response.json();
+};
 const sanitizeText = (value, max = 500) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
 const safeTags = value => (Array.isArray(value) ? value : String(value || '').split(',')).map(item => sanitizeText(item, 40)).filter(Boolean).slice(0, 20);
 const showLoading = loading => document.querySelector('#community-feed')?.classList.toggle('is-loading', loading);
@@ -162,12 +178,26 @@ export async function uploadNote(file, metadata = {}) {
     return note;
   }
   try {
-    const noteRef = doc(collection(db, 'notes'));
-    note.id = noteRef.id;
-    note.firestoreDocId = noteRef.id;
+    const noteRef = backendConfigured ? null : doc(collection(db, 'notes'));
+    if (noteRef) {
+      note.id = noteRef.id;
+      note.firestoreDocId = noteRef.id;
+    }
     // Prefer Cloud Storage for the file bytes. If Storage is not enabled or the upload fails, keep the chunked fallback.
-    const storagePath = await uploadToStorage(activeUser().uid, noteRef.id, file);
+    const storagePath = await uploadToStorage(activeUser().uid, note.id, file);
     if (storagePath) Object.assign(note, { storageMode: 'storage', storagePath, isChunked: false, chunkCount: 0 });
+    if (backendConfigured) {
+      try {
+        const saved = await backendRequest('/api/notes', { method: 'POST', body: JSON.stringify(note) });
+        note.id = saved.id;
+        note.firestoreDocId = saved.id;
+        if (!storagePath) await saveLargeFileChunks(saved.id, dataUrl);
+        return note;
+      } catch (error) {
+        if (storagePath) await removeStoredFile(storagePath);
+        throw error;
+      }
+    }
     const batch = writeBatch(db);
     batch.set(noteRef, { ...note, createdAt: serverTimestamp() });
     try {
@@ -200,6 +230,15 @@ const searchNotesRemote = async term => {
 export async function listCommunityNotes(filters = {}) {
   currentFilters = filters;
   if (localMode) return filterNotes(readNotes(), filters);
+  if (backendConfigured) {
+    const params = new URLSearchParams();
+    if (filters.search) params.set('search', buildSearchTerms({ title: filters.search })[0] || '');
+    if (filters.subject) params.set('subject', filters.subject);
+    if (filters.extension) params.set('extension', filters.extension);
+    if (filters.mine) params.set('mine', 'true');
+    const notes = await backendRequest(`/api/notes?${params}`);
+    return filterNotes(notes.filter(note => !isSampleNote(note)), filters);
+  }
   const loaded = filterNotes(currentNotes, filters);
   const term = sanitizeText(filters.search, 120);
   if (!term) return loaded;
@@ -368,7 +407,7 @@ export async function reportNote(note) {
 }
 const createCard = note => { const card = document.createElement('article'); card.className = 'note-card-community'; const preview = document.createElement('div'); preview.className = `note-preview preview-${note.extension || 'pdf'}`; if (note.thumbnail) { const img = document.createElement('img'); img.src = note.thumbnail; img.alt = ''; img.loading = 'lazy'; Object.assign(img.style, { width: '100%', height: '100%', objectFit: 'cover', display: 'block' }); preview.append(img); } else { preview.textContent = (note.extension || 'PDF').toUpperCase(); } card.append(preview); const title = document.createElement('h3'); title.textContent = note.title || 'Untitled note'; card.append(title); const description = document.createElement('p'); description.textContent = note.description || 'Shared study guide from a campus classmate.'; card.append(description); const meta = document.createElement('div'); meta.className = 'note-meta';[note.subject || 'General', (note.extension || '').toUpperCase(), `By ${note.uploaderName || 'Anonymous'}`].forEach(value => { const span = document.createElement('span'); span.textContent = value; meta.append(span); }); card.append(meta); const actions = document.createElement('div'); actions.className = 'note-card-actions'; const download = document.createElement('button'); download.className = 'button primary btn-download'; download.type = 'button'; download.textContent = 'Free Download'; download.dataset.downloadNote = note.id; download.addEventListener('click', () => handleDownload(note)); const previewBtn = document.createElement("button"); previewBtn.className = "button secondary btn-preview"; previewBtn.type = "button"; previewBtn.textContent = "Preview"; previewBtn.addEventListener("click", () => openPreview(note)); actions.append(previewBtn, download); if (note.uploaderId !== activeUser()?.uid) { const message = document.createElement('button'); message.className = 'button secondary'; message.type = 'button'; message.textContent = 'Message author'; message.addEventListener('click', () => window.SmartNotes.chat?.openChat(note.uploaderId, note.uploaderName)); const report = document.createElement('button'); report.className = 'button secondary btn-report'; report.type = 'button'; report.textContent = 'Report'; report.addEventListener('click', async () => { try { if (await reportNote(note)) { report.textContent = 'Reported'; report.disabled = true; } } catch (error) { alert(error.message); } }); actions.append(message, report); } else { const remove = document.createElement('button'); remove.className = 'button secondary danger-button'; remove.type = 'button'; remove.textContent = 'Delete'; remove.addEventListener('click', async () => { if (confirm('Delete this note permanently?')) { remove.disabled = true; try { await deleteNote(note); await renderMyUploadedNotes(); } catch (error) { remove.disabled = false; alert(error.message); } } }); actions.append(remove); } card.append(actions); return card; };
 export async function renderCommunityFeed(container = document.querySelector('#community-feed'), filters = currentFilters) { if (!container) return []; showLoading(true); try { const notes = await listCommunityNotes(filters); container.replaceChildren(); if (!notes.length) { const empty = document.createElement('p'); empty.className = 'empty-state empty-state-card'; empty.textContent = 'No study notes uploaded yet. Be the first student to share a resource!'; container.append(empty); } else notes.forEach(note => container.append(createCard(note))); return notes; } catch (error) { container.textContent = error.message; return []; } finally { showLoading(false); } }
-export function subscribeCommunityNotes(container = document.querySelector('#community-feed')) { if (localMode) { renderCommunityFeed(container); return () => { }; } unsubscribeNotes?.(); showLoading(true); unsubscribeNotes = onSnapshot(query(collection(db, 'notes'), orderBy('createdAt', 'desc'), limit(200)), snapshot => { currentNotes = snapshot.docs.map(mapNoteSnapshot).filter(note => !isSampleNote(note)); renderCommunityFeed(container, currentFilters); }, error => { if (isLocalFallbackError(error)) { enableLocalMode(error); renderCommunityFeed(container, currentFilters); } else { if (container) container.textContent = 'Unable to load community notes.'; showLoading(false); console.error(error); } }); return unsubscribeNotes; }
+export function subscribeCommunityNotes(container = document.querySelector('#community-feed')) { if (localMode || backendConfigured) { renderCommunityFeed(container); return () => { }; } unsubscribeNotes?.(); showLoading(true); unsubscribeNotes = onSnapshot(query(collection(db, 'notes'), orderBy('createdAt', 'desc'), limit(200)), snapshot => { currentNotes = snapshot.docs.map(mapNoteSnapshot).filter(note => !isSampleNote(note)); renderCommunityFeed(container, currentFilters); }, error => { if (isLocalFallbackError(error)) { enableLocalMode(error); renderCommunityFeed(container, currentFilters); } else { if (container) container.textContent = 'Unable to load community notes.'; showLoading(false); console.error(error); } }); return unsubscribeNotes; }
 async function resolveFirestoreDocId(noteId) { const snapshot = await getDocs(query(collection(db, 'notes'), where('id', '==', noteId))); return snapshot.docs[0]?.id || ''; }
 async function getChunkedDataUrl(note) { const cacheKey = note.firestoreDocId || note.id; const cached = await readLocalFile(cacheKey); if (cached) return cached; if (localMode) { const chunks = await readLocalChunks(cacheKey); if (!chunks.length) throw new Error('File data is unavailable.'); const dataUrl = `data:${note.mimeType || note.contentType || 'application/pdf'};base64,${chunks.join('')}`; await storeLocalFile(cacheKey, dataUrl); return dataUrl; } let docId = note.firestoreDocId || note.id; let chunkSnapshot = await getDocs(collection(db, 'notes', docId, 'chunks')); if (!chunkSnapshot.docs.length && note.id) { const realDocId = await resolveFirestoreDocId(note.id); if (realDocId && realDocId !== docId) { docId = realDocId; chunkSnapshot = await getDocs(collection(db, 'notes', docId, 'chunks')); } } const chunks = chunkSnapshot.docs.map(item => ({ ...item.data(), documentId: item.id })).sort((a, b) => Number(a.index ?? a.documentId) - Number(b.index ?? b.documentId)).map(chunk => chunk.data || chunk.content || chunk.base64 || ''); if (!chunks.length) throw new Error('File data is unavailable.'); const dataUrl = `data:${note.mimeType || note.contentType || 'application/pdf'};base64,${chunks.join('')}`; await storeLocalFile(cacheKey, dataUrl); return dataUrl; }
 export async function getNoteDataUrl(note) { if (note.fileDataUrl) return note.fileDataUrl; if (note.isChunked || note.storageMode === 'chunks' || note.chunkCount || note.chunks) return getChunkedDataUrl(note); throw new Error('This earlier test note has no attached file data. Please re-upload the file to test downloading.'); }
@@ -382,6 +421,13 @@ export async function deleteNote(note) {
   if (localMode) {
     saveNotes(readNotes().filter(item => item.id !== note.id));
     await deleteLocalChunks(note.id);
+    renderCommunityFeed();
+    return;
+  }
+  if (backendConfigured) {
+    await backendRequest(`/api/notes/${encodeURIComponent(note.firestoreDocId || note.id)}`, { method: 'DELETE' });
+    await deleteLocalChunks(note.firestoreDocId || note.id);
+    currentNotes = currentNotes.filter(item => item.id !== note.id);
     renderCommunityFeed();
     return;
   }
