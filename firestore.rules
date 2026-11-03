@@ -73,6 +73,20 @@ service cloud.firestore {
       }
     }
 
+    // Reports are write-only for users. Only the project owner reads them in the console.
+    match /reports/{reportId} {
+      allow read, update, delete: if false;
+      allow create: if isVerified()
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.keys().hasOnly(["reporterId", "noteId", "reason", "createdAt"])
+        && request.resource.data.noteId is string
+        && request.resource.data.noteId.size() <= 100
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() > 0
+        && request.resource.data.reason.size() <= 300
+        && request.resource.data.createdAt == request.time;
+    }
+
     match /conversations/{conversationId} {
       allow read: if isAuthenticated() && request.auth.uid in resource.data.participants;
 
