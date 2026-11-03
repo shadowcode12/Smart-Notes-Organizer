@@ -7,9 +7,7 @@
     "@firebase/rules-unit-testing": "^3.0.4"
   },
   "dependencies": {
-    "firebase": "^10.12.2",
-    "aws4fetch": "^1.0.20",
-    "jose": "^5.9.6"
+    "firebase": "^10.12.2"
   },
   "allowScripts": {
     "@firebase/util@1.15.3": true
