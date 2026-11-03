@@ -77,6 +77,7 @@ service cloud.firestore {
     match /reports/{reportId} {
       allow read, update, delete: if false;
       allow create: if isVerified()
+        && reportId == request.auth.uid + '_' + request.resource.data.noteId
         && request.resource.data.reporterId == request.auth.uid
         && request.resource.data.keys().hasOnly(["reporterId", "noteId", "reason", "createdAt"])
         && request.resource.data.noteId is string

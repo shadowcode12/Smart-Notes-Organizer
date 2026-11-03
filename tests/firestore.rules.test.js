@@ -2,9 +2,6 @@ import { readFileSync } from 'node:fs';
 import { before, after, afterEach, test } from 'node:test';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
 import {
-  addDoc,
-  collection,
-  getDocs,
   doc,
   setDoc,
   getDoc,
@@ -177,13 +174,14 @@ test('thumbnails are optional but limited to 100000 characters', async () => {
   );
   await assertFails(setDoc(doc(uploader, 'notes/t3'), { ...note(), thumbnail: 12345 }));
 });
-test("users can file reports but cannot read or edit them", async () => {
+test("a user can report a note once, with the id <uid>_<noteId>", async () => {
   const reporter = user("reporter");
   const valid = { reporterId: "reporter", noteId: "n1", reason: "Spam", createdAt: new Date() };
-  await assertSucceeds(addDoc(collection(reporter, "reports"), valid));
-  await assertFails(addDoc(collection(reporter, "reports"), { ...valid, reporterId: "someone-else" }));
-  await assertFails(addDoc(collection(reporter, "reports"), { ...valid, reason: "" }));
-  await assertFails(addDoc(collection(reporter, "reports"), { ...valid, extra: true }));
-  await assertFails(addDoc(collection(anon(), "reports"), { ...valid, reporterId: "" }));
-  await assertFails(getDocs(collection(reporter, "reports")));
+  await assertSucceeds(setDoc(doc(reporter, "reports/reporter_n1"), valid));
+  await assertFails(setDoc(doc(reporter, "reports/reporter_n1"), valid));
+  await assertFails(setDoc(doc(reporter, "reports/someone_n1"), valid));
+  await assertFails(setDoc(doc(reporter, "reports/reporter_n2"), { ...valid, reporterId: "someone-else" }));
+  await assertFails(setDoc(doc(reporter, "reports/reporter_n2"), { ...valid, noteId: "n2", reason: "" }));
+  await assertFails(setDoc(doc(reporter, "reports/reporter_n2"), { ...valid, noteId: "n2", extra: true }));
+  await assertFails(getDoc(doc(reporter, "reports/reporter_n1")));
 });
