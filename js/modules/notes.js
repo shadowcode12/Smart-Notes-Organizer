@@ -210,7 +210,34 @@ export async function listCommunityNotes(filters = {}) {
   const seen = new Set(loaded.map(note => note.id));
   return [...loaded, ...remote.filter(note => !seen.has(note.id))];
 }
-export async function renderMyUploadedNotes(container = document.querySelector('#my-uploaded-notes-grid')) { if (!container) return []; const notes = filterNotes(localMode ? readNotes() : currentNotes, { mine: true }); container.replaceChildren(); if (!notes.length) { const empty = document.createElement('p'); empty.className = 'empty-state empty-state-card'; empty.textContent = 'You have not uploaded any study notes yet.'; container.append(empty); return notes; } notes.forEach(note => container.append(createCard(note))); return notes; }
+// Shows the signed-in user's real upload totals (count, size, last upload date) in the sidebar.
+const toMillis = value => (typeof value?.toMillis === 'function' ? value.toMillis() : Number(value) || 0);
+export async function updateUploadUsage() {
+  const targets = document.querySelectorAll('[data-upload-usage]');
+  if (!targets.length) return;
+  const user = activeUser();
+  if (!user) {
+    targets.forEach(el => { el.querySelector('[data-usage-total]').textContent = 'Sign in to see uploads'; el.querySelector('[data-usage-detail]').textContent = ''; });
+    return;
+  }
+  let mine = [];
+  try {
+    if (localMode) mine = readNotes().filter(note => note.uploaderId === user.uid);
+    else {
+      const snapshot = await getDocs(query(collection(db, 'notes'), where('uploaderId', '==', user.uid)));
+      mine = snapshot.docs.map(docSnap => docSnap.data());
+    }
+  } catch (error) {
+    console.warn('Could not load upload totals.', error);
+  }
+  const bytes = mine.reduce((sum, note) => sum + (Number(note.fileSize ?? note.size) || 0), 0);
+  const latest = Math.max(0, ...mine.map(note => toMillis(note.createdAt)));
+  const count = `${mine.length} file${mine.length === 1 ? '' : 's'}`;
+  const total = mine.length ? `${(bytes / 1048576).toFixed(1)} MB · ${count}` : 'No uploads yet';
+  const detail = latest ? `Last upload ${new Date(latest).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}` : 'Upload a file to start';
+  targets.forEach(el => { el.querySelector('[data-usage-total]').textContent = total; el.querySelector('[data-usage-detail]').textContent = detail; });
+}
+export async function renderMyUploadedNotes(container = document.querySelector('#my-uploaded-notes-grid')) { updateUploadUsage(); if (!container) return []; const notes = filterNotes(localMode ? readNotes() : currentNotes, { mine: true }); container.replaceChildren(); if (!notes.length) { const empty = document.createElement('p'); empty.className = 'empty-state empty-state-card'; empty.textContent = 'You have not uploaded any study notes yet.'; container.append(empty); return notes; } notes.forEach(note => container.append(createCard(note))); return notes; }
 const showDownloadToast = text => { const toast = document.createElement('div'); toast.className = 'download-toast'; toast.textContent = text; Object.assign(toast.style, { position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: '10000', padding: '12px 18px', borderRadius: '999px', background: '#172033', color: '#fff' }); document.body.append(toast); setTimeout(() => toast.remove(), 3000); };
 const handleDownload = async note => { if (!activeUser()) { window.location.href = window.location.pathname.includes('/pages/') ? 'login.html' : 'pages/login.html'; return; } showDownloadToast('Downloading file...'); try { await downloadNoteFile(note); } catch (error) { showDownloadToast(error.message); } };
 const createCard = note => { const card = document.createElement('article'); card.className = 'note-card-community'; const preview = document.createElement('div'); preview.className = `note-preview preview-${note.extension || 'pdf'}`; if (note.thumbnail) { const img = document.createElement('img'); img.src = note.thumbnail; img.alt = ''; img.loading = 'lazy'; Object.assign(img.style, { width: '100%', height: '100%', objectFit: 'cover', display: 'block' }); preview.append(img); } else { preview.textContent = (note.extension || 'PDF').toUpperCase(); } card.append(preview); const title = document.createElement('h3'); title.textContent = note.title || 'Untitled note'; card.append(title); const description = document.createElement('p'); description.textContent = note.description || 'Shared study guide from a campus classmate.'; card.append(description); const meta = document.createElement('div'); meta.className = 'note-meta';[note.subject || 'General', (note.extension || '').toUpperCase(), `By ${note.uploaderName || 'Anonymous'}`].forEach(value => { const span = document.createElement('span'); span.textContent = value; meta.append(span); }); card.append(meta); const actions = document.createElement('div'); actions.className = 'note-card-actions'; const download = document.createElement('button'); download.className = 'button primary btn-download'; download.type = 'button'; download.textContent = 'Free Download'; download.dataset.downloadNote = note.id; download.addEventListener('click', () => handleDownload(note)); actions.append(download); if (note.uploaderId !== activeUser()?.uid) { const message = document.createElement('button'); message.className = 'button secondary'; message.type = 'button'; message.textContent = 'Message author'; message.addEventListener('click', () => window.SmartNotes.chat?.openChat(note.uploaderId, note.uploaderName)); actions.append(message); } else { const remove = document.createElement('button'); remove.className = 'button secondary danger-button'; remove.type = 'button'; remove.textContent = 'Delete'; remove.addEventListener('click', async () => { if (confirm('Delete this note permanently?')) { remove.disabled = true; try { await deleteNote(note); await renderMyUploadedNotes(); } catch (error) { remove.disabled = false; alert(error.message); } } }); actions.append(remove); } card.append(actions); return card; };
