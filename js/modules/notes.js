@@ -412,7 +412,21 @@ export function bindUploadWidget(widget = document.querySelector('[data-upload-w
   dropZone?.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') openPicker(event); });
   ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(type => dropZone?.addEventListener(type, event => { event.preventDefault(); event.stopPropagation(); dropZone.classList.toggle('drag-over', type === 'dragenter' || type === 'dragover'); if (type === 'drop') selectFiles(event.dataTransfer.files); }));
   input?.addEventListener('change', event => selectFiles(event.target.files));
-  publish?.addEventListener('click', async () => { if (!activeUser()) { status.textContent = 'Please log in before uploading study files.'; status.className = 'upload-status error'; return; } if (!selectedFiles.length) { status.textContent = 'Choose at least one study file first.'; status.className = 'upload-status error'; return; } publish.disabled = true; widget.classList.add('is-uploading'); try { for (const file of selectedFiles) await uploadNote(file, { title: fields('.note-title'), subject: fields('.note-subject'), tags: fields('.note-tags'), description: fields('.note-description') }); status.textContent = `${selectedFiles.length} note${selectedFiles.length === 1 ? '' : 's'} published successfully.`; status.className = 'upload-status success'; selectedFiles = []; renderFiles(); await subscribeCommunityNotes(); await renderMyUploadedNotes(); } catch (error) { status.textContent = error.message; status.className = 'upload-status error'; } finally { widget.classList.remove('is-uploading'); publish.disabled = false; } });
+  publish?.addEventListener('click', async () => { if (!activeUser()) { status.textContent = 'Please log in before uploading study files.'; status.className = 'upload-status error'; return; } if (!selectedFiles.length) { status.textContent = 'Choose at least one study file first.'; status.className = 'upload-status error'; return; } publish.disabled = true; widget.classList.add('is-uploading'); try { // Uploads go in batches of 3 with a 60 second pause between batches. This slows down scripted floods.
+      const UPLOAD_BATCH_SIZE = 3;
+      const UPLOAD_PAUSE_MS = 60 * 1000;
+      const meta = { title: fields('.note-title'), subject: fields('.note-subject'), tags: fields('.note-tags'), description: fields('.note-description') };
+      for (let start = 0; start < selectedFiles.length; start += UPLOAD_BATCH_SIZE) {
+        const batch = selectedFiles.slice(start, start + UPLOAD_BATCH_SIZE);
+        for (const file of batch) await uploadNote(file, meta);
+        if (start + UPLOAD_BATCH_SIZE < selectedFiles.length) {
+          for (let remaining = 60; remaining > 0; remaining -= 1) {
+            status.textContent = `Uploaded ${Math.min(start + UPLOAD_BATCH_SIZE, selectedFiles.length)} of ${selectedFiles.length}. Next batch in ${remaining}s to keep uploads fair.`;
+            status.className = 'upload-status';
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+      } status.textContent = `${selectedFiles.length} note${selectedFiles.length === 1 ? '' : 's'} published successfully.`; status.className = 'upload-status success'; selectedFiles = []; renderFiles(); await subscribeCommunityNotes(); await renderMyUploadedNotes(); } catch (error) { status.textContent = error.message; status.className = 'upload-status error'; } finally { widget.classList.remove('is-uploading'); publish.disabled = false; } });
 }
 api.notes = { uploadNote, listCommunityNotes, getNoteDataUrl, downloadNote, deleteNote, bindUploadWidget, renderCommunityFeed, renderMyUploadedNotes, subscribeCommunityNotes };
 document.querySelectorAll('[data-upload-widget]').forEach(bindUploadWidget);
