@@ -148,9 +148,9 @@ def create_note(note: NoteMetadata, user: Annotated[dict, Depends(verified_user)
     payload = note.model_dump(exclude_none=True) if hasattr(note, "model_dump") else note.dict(exclude_none=True)
     payload["uploaderId"] = uid
     payload["size"] = note.fileSize
-    payload.pop("id", None)
+    requested_id = payload.pop("id", None)
     payload.pop("createdAt", None)
-    note_ref = db.collection("notes").document()
+    note_ref = db.collection("notes").document(requested_id) if requested_id else db.collection("notes").document()
     payload["id"] = note_ref.id
     payload["createdAt"] = firestore.SERVER_TIMESTAMP
     note_ref.set(payload)
