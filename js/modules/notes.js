@@ -149,6 +149,8 @@ export async function uploadNote(file, metadata = {}) {
   if (!localMode && !activeUser().emailVerified) throw new Error('Verify your email address before uploading. Check your inbox for the verification link.');
   if (!acceptedExtensions.has(ext(file.name))) throw new Error('This file type is not supported.');
   if (file.size > MAX_FILE_SIZE) throw new Error('File size exceeds the 5 MB limit.');
+  const usage = await getUploadUsage(activeUser().uid);
+  if (usage.bytes + file.size > USER_UPLOAD_QUOTA) throw new Error(`You have reached your ${Math.round(USER_UPLOAD_QUOTA / 1048576)} MB free space. Delete a note to upload more.`);
   const dataUrl = await fileToDataUrl(file);
   const note = noteMetadata(file, dataUrl, metadata);
   note.searchTerms = buildSearchTerms(note);
@@ -210,32 +212,46 @@ export async function listCommunityNotes(filters = {}) {
   const seen = new Set(loaded.map(note => note.id));
   return [...loaded, ...remote.filter(note => !seen.has(note.id))];
 }
-// Shows the signed-in user's real upload totals (count, size, last upload date) in the sidebar.
+// Per-user free storage. Enforced on upload and shown in the sidebar.
+export const USER_UPLOAD_QUOTA = 50 * 1024 * 1024;
 const toMillis = value => (typeof value?.toMillis === 'function' ? value.toMillis() : Number(value) || 0);
-export async function updateUploadUsage() {
-  const targets = document.querySelectorAll('[data-upload-usage]');
-  if (!targets.length) return;
-  const user = activeUser();
-  if (!user) {
-    targets.forEach(el => { el.querySelector('[data-usage-total]').textContent = 'Sign in to see uploads'; el.querySelector('[data-usage-detail]').textContent = ''; });
-    return;
-  }
+const formatMb = bytes => `${(bytes / 1048576).toFixed(1)} MB`;
+export async function getUploadUsage(uid = activeUser()?.uid) {
+  if (!uid) return { bytes: 0, count: 0, latest: 0 };
   let mine = [];
   try {
-    if (localMode) mine = readNotes().filter(note => note.uploaderId === user.uid);
+    if (localMode) mine = readNotes().filter(note => note.uploaderId === uid);
     else {
-      const snapshot = await getDocs(query(collection(db, 'notes'), where('uploaderId', '==', user.uid)));
+      const snapshot = await getDocs(query(collection(db, 'notes'), where('uploaderId', '==', uid)));
       mine = snapshot.docs.map(docSnap => docSnap.data());
     }
   } catch (error) {
     console.warn('Could not load upload totals.', error);
   }
-  const bytes = mine.reduce((sum, note) => sum + (Number(note.fileSize ?? note.size) || 0), 0);
-  const latest = Math.max(0, ...mine.map(note => toMillis(note.createdAt)));
-  const count = `${mine.length} file${mine.length === 1 ? '' : 's'}`;
-  const total = mine.length ? `${(bytes / 1048576).toFixed(1)} MB · ${count}` : 'No uploads yet';
-  const detail = latest ? `Last upload ${new Date(latest).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}` : 'Upload a file to start';
-  targets.forEach(el => { el.querySelector('[data-usage-total]').textContent = total; el.querySelector('[data-usage-detail]').textContent = detail; });
+  return {
+    bytes: mine.reduce((sum, note) => sum + (Number(note.fileSize ?? note.size) || 0), 0),
+    count: mine.length,
+    latest: Math.max(0, ...mine.map(note => toMillis(note.createdAt)))
+  };
+}
+export async function updateUploadUsage() {
+  const targets = document.querySelectorAll('[data-upload-usage]');
+  if (!targets.length) return;
+  const set = (el, selector, text) => { const node = el.querySelector(selector); if (node) node.textContent = text; };
+  if (!activeUser()) {
+    targets.forEach(el => { set(el, '[data-usage-total]', 'Sign in to see your space'); set(el, '[data-usage-free]', ''); set(el, '[data-usage-detail]', ''); el.querySelector('[data-usage-bar]').style.width = '0%'; });
+    return;
+  }
+  const { bytes, count, latest } = await getUploadUsage();
+  const percent = Math.min(100, (bytes / USER_UPLOAD_QUOTA) * 100);
+  const lastDate = latest ? new Date(latest).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  targets.forEach(el => {
+    set(el, '[data-usage-percent]', `${Math.round(percent)}%`);
+    set(el, '[data-usage-total]', `${formatMb(bytes)} of ${formatMb(USER_UPLOAD_QUOTA)} used`);
+    set(el, '[data-usage-free]', `${formatMb(Math.max(0, USER_UPLOAD_QUOTA - bytes))} free`);
+    set(el, '[data-usage-detail]', count ? `${count} file${count === 1 ? '' : 's'} uploaded · last upload ${lastDate}` : 'No uploads yet');
+    el.querySelector('[data-usage-bar]').style.width = `${percent}%`;
+  });
 }
 export async function renderMyUploadedNotes(container = document.querySelector('#my-uploaded-notes-grid')) { updateUploadUsage(); if (!container) return []; const notes = filterNotes(localMode ? readNotes() : currentNotes, { mine: true }); container.replaceChildren(); if (!notes.length) { const empty = document.createElement('p'); empty.className = 'empty-state empty-state-card'; empty.textContent = 'You have not uploaded any study notes yet.'; container.append(empty); return notes; } notes.forEach(note => container.append(createCard(note))); return notes; }
 const showDownloadToast = text => { const toast = document.createElement('div'); toast.className = 'download-toast'; toast.textContent = text; Object.assign(toast.style, { position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: '10000', padding: '12px 18px', borderRadius: '999px', background: '#172033', color: '#fff' }); document.body.append(toast); setTimeout(() => toast.remove(), 3000); };
