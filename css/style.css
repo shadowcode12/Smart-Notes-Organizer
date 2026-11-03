@@ -1697,3 +1697,82 @@ body.auth-body {
         padding: 26px 20px
     }
 }
+/* In-browser file preview */
+.preview-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(15, 23, 42, .7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px
+}
+
+.preview-dialog {
+    background: var(--panel);
+    border-radius: 14px;
+    width: min(960px, 100%);
+    height: min(90vh, 900px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden
+}
+
+.preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line)
+}
+
+.preview-header strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap
+}
+
+.preview-body {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    background: #f1f5f9;
+    text-align: center
+}
+
+.preview-page {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto 12px;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, .15)
+}
+
+.preview-doc {
+    background: #fff;
+    text-align: left;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 24px;
+    line-height: 1.6;
+    overflow-wrap: anywhere
+}
+
+.preview-doc img {
+    max-width: 100%;
+    height: auto
+}
+
+.preview-note {
+    color: var(--muted);
+    font-size: 13px
+}
+
+@media (max-width: 640px) {
+    .preview-dialog {
+        height: 95vh
+    }
+}
