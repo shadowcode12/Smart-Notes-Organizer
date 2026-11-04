@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+from pathlib import Path
 from typing import Annotated, Any
 
 try:
@@ -20,6 +22,16 @@ import firebase_admin
 from firebase_admin import auth as firebase_auth
 from firebase_admin import credentials, firestore
 
+
+# Load backend/.env so the Firebase and B2 settings work with run-demo.bat.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+except ImportError:
+    pass
+
+logger = logging.getLogger("smartnotes")
 
 if not firebase_admin._apps:
     service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
@@ -51,7 +63,11 @@ def require_user(authorization: Annotated[str | None, Header()] = None) -> dict:
     try:
         return firebase_auth.verify_id_token(token)
     except Exception as error:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token") from error
+        logger.warning("Token verification failed: %s", error)
+        detail = "Invalid bearer token"
+        if not firebase_admin._apps:
+            detail += " (backend Firebase is not configured: set FIREBASE_SERVICE_ACCOUNT_FILE in backend/.env)"
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail) from error
 
 
 def verified_user(user: Annotated[dict, Depends(require_user)]) -> dict:
