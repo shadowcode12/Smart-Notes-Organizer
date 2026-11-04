@@ -1,25 +1,57 @@
 import json
+import logging
 import os
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, Any
 
+try:
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+except ImportError:
+    boto3 = None
+
+    class BotoCoreError(Exception):
+        pass
+
+    class ClientError(Exception):
+        pass
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict, Field
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from firebase_admin import credentials, firestore
 
 
+# Load backend/.env so the Firebase and B2 settings work with run-demo.bat.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+except ImportError:
+    pass
+
+logger = logging.getLogger("smartnotes")
+
 if not firebase_admin._apps:
     service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+    service_account_file = os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE")
     if service_account_json:
-        try:
-            firebase_admin.initialize_app(
-                credentials.Certificate(json.loads(service_account_json))
-            )
-        except (ValueError, json.JSONDecodeError):
-            pass
+        firebase_admin.initialize_app(credentials.Certificate(json.loads(service_account_json)))
+    elif service_account_file:
+        firebase_admin.initialize_app(credentials.Certificate(service_account_file))
 
 app = FastAPI(title="SmartNotes Backend")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+MAX_FILE_BYTES = 5 * 1024 * 1024
+LINK_SECONDS = 300
 
 
 def require_user(authorization: Annotated[str | None, Header()] = None) -> dict:
@@ -31,7 +63,11 @@ def require_user(authorization: Annotated[str | None, Header()] = None) -> dict:
     try:
         return firebase_auth.verify_id_token(token)
     except Exception as error:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token") from error
+        logger.warning("Token verification failed: %s", error)
+        detail = "Invalid bearer token"
+        if not firebase_admin._apps:
+            detail += " (backend Firebase is not configured: set FIREBASE_SERVICE_ACCOUNT_FILE in backend/.env)"
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail) from error
 
 
 def verified_user(user: Annotated[dict, Depends(require_user)]) -> dict:
@@ -58,6 +94,8 @@ def get_firestore():
 
 
 class NoteMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     title: str = Field(..., max_length=120)
     description: str = ""
     subject: str = ""
@@ -79,8 +117,58 @@ class NoteMetadata(BaseModel):
     id: str | None = None
     createdAt: object | None = None
 
-    class Config:
-        extra = "allow"
+class FileUploadRequest(BaseModel):
+    noteId: str = Field(..., pattern=r"^[A-Za-z0-9_-]{5,100}$")
+    fileName: str = Field(..., min_length=1, max_length=180)
+    size: int = Field(..., ge=1, le=MAX_FILE_BYTES)
+    contentType: str = Field(default="application/octet-stream", max_length=100)
+
+
+class FileKeyRequest(BaseModel):
+    key: str = Field(..., min_length=1, max_length=300)
+
+
+class ReportRequest(BaseModel):
+    noteId: str = Field(..., min_length=1, max_length=100)
+    reason: str = Field(..., min_length=1, max_length=300)
+
+
+def b2_client():
+    if boto3 is None:
+        raise HTTPException(status_code=500, detail="File storage dependencies are not installed.")
+    values = {name: os.getenv(name) for name in ("B2_KEY_ID", "B2_APP_KEY", "B2_REGION")}
+    if not all(values.values()) or not os.getenv("B2_BUCKET"):
+        raise HTTPException(status_code=500, detail="File storage is not configured.")
+    return boto3.client(
+        "s3",
+        endpoint_url=f"https://s3.{values['B2_REGION']}.backblazeb2.com",
+        aws_access_key_id=values["B2_KEY_ID"],
+        aws_secret_access_key=values["B2_APP_KEY"],
+        region_name=values["B2_REGION"],
+    )
+
+
+def clean_file_name(name: str) -> str:
+    safe = "".join("_" if char in '/\\"' or ord(char) < 32 else char for char in name).strip()
+    if not safe:
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    return safe[:180]
+
+
+def valid_file_key(key: str) -> bool:
+    return key.startswith("notes/") and ".." not in key and len(key) <= 300
+
+
+def presigned_url(method: str, key: str, **params: Any) -> str:
+    try:
+        return b2_client().generate_presigned_url(
+            "put_object" if method == "PUT" else "get_object" if method == "GET" else "delete_object",
+            Params={"Bucket": os.environ["B2_BUCKET"], "Key": key, **params},
+            ExpiresIn=LINK_SECONDS,
+            HttpMethod=method,
+        )
+    except (BotoCoreError, ClientError) as error:
+        raise HTTPException(status_code=500, detail="Could not create file link.") from error
 
 
 def note_data(snapshot) -> dict:
@@ -97,6 +185,65 @@ def health() -> dict[str, str]:
 @app.get("/me")
 def me(user: Annotated[dict, Depends(require_user)]) -> dict[str, str | None]:
     return {"uid": user.get("uid", ""), "email": user.get("email")}
+
+
+@app.post("/api/files/upload-url")
+def create_upload_url(
+    request: FileUploadRequest,
+    user: Annotated[dict, Depends(verified_user)],
+):
+    key = f"notes/{user['uid']}/{request.noteId}/{clean_file_name(request.fileName)}"
+    content_type = request.contentType or "application/octet-stream"
+    url = presigned_url(
+        "PUT",
+        key,
+        ContentType=content_type,
+        ContentLength=request.size,
+    )
+    return {"key": key, "url": url, "headers": {"Content-Type": content_type}}
+
+
+@app.get("/api/files/download-url")
+def create_download_url(
+    key: str = Query(..., max_length=300),
+    user: Annotated[dict, Depends(require_user)] = None,
+):
+    if not valid_file_key(key):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+    return {"url": presigned_url("GET", key)}
+
+
+@app.post("/api/files/delete-url")
+def create_delete_url(
+    request: FileKeyRequest,
+    user: Annotated[dict, Depends(require_user)],
+):
+    if not valid_file_key(request.key):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+    if not request.key.startswith(f"notes/{user.get('uid')}/"):
+        raise HTTPException(status_code=403, detail="You can only delete your own files.")
+    return {"url": presigned_url("DELETE", request.key)}
+
+
+@app.post("/api/reports", status_code=201)
+def create_report(
+    request: ReportRequest,
+    user: Annotated[dict, Depends(verified_user)],
+):
+    db = get_firestore()
+    report_id = f"{user['uid']}_{request.noteId}"
+    report_ref = db.collection("reports").document(report_id)
+    if report_ref.get().exists:
+        raise HTTPException(status_code=409, detail="You have already reported this note.")
+    report_ref.set(
+        {
+            "reporterId": user["uid"],
+            "noteId": request.noteId,
+            "reason": request.reason,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        }
+    )
+    return {"id": report_id, "reported": True}
 
 
 @app.get("/api/notes")
@@ -167,6 +314,14 @@ def delete_note(note_id: str, user: Annotated[dict, Depends(verified_user)]):
     note = snapshot.to_dict() or {}
     if note.get("uploaderId") != user["uid"]:
         raise HTTPException(status_code=403, detail="Only the note uploader can delete this note.")
+    storage_path = note.get("storagePath")
+    if storage_path:
+        if not storage_path.startswith(f"notes/{user['uid']}/") or not valid_file_key(storage_path):
+            raise HTTPException(status_code=422, detail="Invalid storage path.")
+        try:
+            b2_client().delete_object(Bucket=os.environ["B2_BUCKET"], Key=storage_path)
+        except (BotoCoreError, ClientError) as error:
+            raise HTTPException(status_code=502, detail="Could not delete the stored file.") from error
     for chunk in note_ref.collection("chunks").stream():
         chunk.reference.delete()
     note_ref.delete()

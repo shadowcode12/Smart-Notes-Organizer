@@ -9,7 +9,7 @@ admin.initializeApp();
 
 const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
 const FROM_EMAIL = process.env.NOTIFY_FROM_EMAIL || 'SmartNotes <onboarding@resend.dev>';
-const SITE_URL = process.env.SITE_URL || 'https://smartnotes-six.vercel.app';
+const SITE_URL = process.env.SITE_URL || 'http://localhost:8080';
 
 exports.notifyNewMessage = onDocumentCreated(
   {

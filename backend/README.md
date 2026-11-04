@@ -1,4 +1,4 @@
-# SmartNotes Backend Skeleton
+# SmartNotes Backend
 
 ## Setup
 
@@ -13,16 +13,18 @@ pip install -r backend/requirements.txt
 Run the development server with:
 
 ```text
-uvicorn backend.app.main:app --reload
+cd backend
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Set `FIREBASE_SERVICE_ACCOUNT_JSON` to the service-account JSON string before
-starting the server. The backend returns `Backend is not configured` if this
-variable is absent; it never reads credentials from a file.
+Set `FIREBASE_SERVICE_ACCOUNT_JSON` to the service-account JSON string, or
+`FIREBASE_SERVICE_ACCOUNT_FILE` to a local service-account file, before starting
+the server. File storage also requires the B2 variables in `.env.example`.
 
 The notes API is available at `/api/notes`. Public listing is supported, while
 creating and deleting notes require a verified Firebase email. Tests mock
 Firebase verification and Firestore, so they never need credentials.
 
-The browser uses the backend when `window.SMART_NOTES_BACKEND_URL` is set.
-Without that setting it keeps the existing Firestore/local behavior.
+The browser uses `http://localhost:8000` by default and can override it with
+`window.SMART_NOTES_API_BASE`. Without Firebase configuration it keeps the
+existing local behavior.

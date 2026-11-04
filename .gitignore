@@ -3,6 +3,9 @@ node_modules/
 # Local development and editor files
 .env
 .env.*
+backend/.env
+backend/.env.*
+*service-account*.json
 .vscode/
 
 # Build and coverage output
