@@ -12,6 +12,7 @@ export const firebaseConfig = window.SMART_NOTES_FIREBASE_CONFIG || {
   messagingSenderId: '631078618718',
   appId: '1:631078618718:web:e6a94f4d97e71682edd6cf'
 };
+export const API_BASE = String(window.SMART_NOTES_API_BASE || 'http://localhost:8000').replace(/\/$/, '');
 
 const placeholderPattern = /YOUR_|REPLACE|PLACEHOLDER|example|changeme/i;
 export function isInvalidApiKeyError(error) {

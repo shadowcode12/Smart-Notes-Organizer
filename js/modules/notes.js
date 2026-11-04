@@ -1,4 +1,4 @@
-import { auth, db, firebaseReady, isLocalFallbackError } from '../config/firebase-config.js';
+import { API_BASE, auth, db, firebaseReady, isLocalFallbackError } from '../config/firebase-config.js';
 import { addDoc, collection, getDoc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, doc, getDocs, where, writeBatch } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const api = window.SmartNotes ||= {};
@@ -17,15 +17,19 @@ const isSampleNote = note => note?.isSample === true || note?.sample === true ||
 const readNotes = () => { try { return (JSON.parse(localStorage.getItem(NOTES_KEY)) || []).filter(note => !isSampleNote(note)); } catch { return []; } };
 const saveNotes = notes => localStorage.setItem(NOTES_KEY, JSON.stringify(notes.filter(note => !isSampleNote(note))));
 const activeUser = () => localMode ? api.auth?.currentUser?.() : auth?.currentUser;
-const backendUrl = String(window.SMART_NOTES_BACKEND_URL || '').replace(/\/$/, '');
-const backendConfigured = Boolean(backendUrl);
+const backendConfigured = !localMode && Boolean(API_BASE);
 const backendRequest = async (path, options = {}) => {
   const user = activeUser();
   const token = user?.getIdToken ? await user.getIdToken() : '';
   const headers = new Headers(options.headers || {});
   headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  const response = await fetch(`${backendUrl}${path}`, { ...options, headers });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch (error) {
+    throw new Error('Backend is offline. Start it with run-demo.bat.', { cause: error });
+  }
   if (!response.ok) {
     let detail = `Backend request failed (${response.status}).`;
     try { detail = (await response.json()).detail || detail; } catch { /* non-JSON error */ }
@@ -149,7 +153,7 @@ async function uploadToStorage(uid, noteId, file) {
   try {
     const token = await idToken();
     if (!token) return '';
-    const response = await fetch('/api/files?action=upload-url', {
+    const response = await fetch(`${API_BASE}/api/files/upload-url`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ noteId, fileName: safeStorageName(file.name), size: file.size, contentType: file.type || 'application/octet-stream' })
@@ -168,7 +172,7 @@ async function removeStoredFile(path) {
   if (!path) return;
   try {
     const token = await idToken();
-    const response = await fetch('/api/files?action=delete-url', {
+    const response = await fetch(`${API_BASE}/api/files/delete-url`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: path })
@@ -180,7 +184,7 @@ async function removeStoredFile(path) {
 }
 async function getStoredBytes(path) {
   const token = await idToken();
-  const response = await fetch(`/api/files?action=download-url&key=${encodeURIComponent(path)}`, { headers: { Authorization: `Bearer ${token}` } });
+  const response = await fetch(`${API_BASE}/api/files/download-url?key=${encodeURIComponent(path)}`, { headers: { Authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error('File could not be loaded.');
   const { url } = await response.json();
   const file = await fetch(url);
@@ -418,15 +422,13 @@ export async function openPreview(note) {
 export async function reportNote(note) {
   const user = activeUser();
   if (!user) throw new Error("Sign in to report a note.");
-  if (localMode || !db) throw new Error("Reporting is available on the live site only.");
+  if (localMode) throw new Error("Reporting is available on the live site only.");
   const reason = window.prompt("Why are you reporting this note? (spam, wrong content, copyright, other)");
   if (!reason || !reason.trim()) return false;
-  try {
-    await setDoc(doc(db, "reports", `${user.uid}_${note.id}`), { reporterId: user.uid, noteId: note.id, reason: sanitizeText(reason, 300), createdAt: serverTimestamp() });
-  } catch (error) {
-    if (error?.code === "permission-denied") throw new Error("You have already reported this note.");
-    throw error;
-  }
+  await backendRequest('/api/reports', {
+    method: 'POST',
+    body: JSON.stringify({ noteId: note.id, reason: sanitizeText(reason, 300) })
+  });
   return true;
 }
 const createCard = note => { const card = document.createElement('article'); card.className = 'note-card-community'; const preview = document.createElement('div'); preview.className = `note-preview preview-${note.extension || 'pdf'}`; if (note.thumbnail) { const img = document.createElement('img'); img.src = note.thumbnail; img.alt = ''; img.loading = 'lazy'; Object.assign(img.style, { width: '100%', height: '100%', objectFit: 'cover', display: 'block' }); preview.append(img); } else { preview.textContent = (note.extension || 'PDF').toUpperCase(); } card.append(preview); const title = document.createElement('h3'); title.textContent = note.title || 'Untitled note'; card.append(title); const description = document.createElement('p'); description.textContent = note.description || 'Shared study guide from a campus classmate.'; card.append(description); const meta = document.createElement('div'); meta.className = 'note-meta';[note.subject || 'General', (note.extension || '').toUpperCase(), `By ${note.uploaderName || 'Anonymous'}`].forEach(value => { const span = document.createElement('span'); span.textContent = value; meta.append(span); }); card.append(meta); const actions = document.createElement('div'); actions.className = 'note-card-actions'; const download = document.createElement('button'); download.className = 'button primary btn-download'; download.type = 'button'; download.textContent = 'Free Download'; download.dataset.downloadNote = note.id; download.addEventListener('click', () => handleDownload(note)); const previewBtn = document.createElement("button"); previewBtn.className = "button secondary btn-preview"; previewBtn.type = "button"; previewBtn.textContent = "Preview"; previewBtn.addEventListener("click", () => openPreview(note)); actions.append(previewBtn, download); if (note.uploaderId !== activeUser()?.uid) { const message = document.createElement('button'); message.className = 'button secondary'; message.type = 'button'; message.textContent = 'Message author'; message.addEventListener('click', () => window.SmartNotes.chat?.openChat(note.uploaderId, note.uploaderName)); const report = document.createElement('button'); report.className = 'button secondary btn-report'; report.type = 'button'; report.textContent = 'Report'; report.addEventListener('click', async () => { try { if (await reportNote(note)) { report.textContent = 'Reported'; report.disabled = true; } } catch (error) { alert(error.message); } }); actions.append(message, report); } else { const remove = document.createElement('button'); remove.className = 'button secondary danger-button'; remove.type = 'button'; remove.textContent = 'Delete'; remove.addEventListener('click', async () => { if (confirm('Delete this note permanently?')) { remove.disabled = true; try { await deleteNote(note); await renderMyUploadedNotes(); } catch (error) { remove.disabled = false; alert(error.message); } } }); actions.append(remove); } card.append(actions); return card; };

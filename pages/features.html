@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com https://www.google.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.googleusercontent.com; connect-src 'self' https://s3.us-east-005.backblazeb2.com https://*.googleapis.com wss://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.cloudfunctions.net https://identitytoolkit.googleapis.com; frame-src 'self' https://smartnotes-8f51d.firebaseapp.com https://accounts.google.com https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com https://www.google.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.googleusercontent.com; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 https://s3.us-east-005.backblazeb2.com https://*.googleapis.com wss://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.cloudfunctions.net https://identitytoolkit.googleapis.com; frame-src 'self' https://smartnotes-8f51d.firebaseapp.com https://accounts.google.com https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';">
     <title>Features | SmartNotes</title>
     <link rel="stylesheet" href="../css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
@@ -13,14 +13,14 @@
 
 <body class="marketing-page">
     <header>
-        <nav class="navbar"><a class="logo" href="../index.html">📝 SmartNotes</a>
+        <nav class="navbar"><a class="logo" href="../index.html">ðŸ“ SmartNotes</a>
             <ul class="nav-links">
                 <li><a class="current" href="features.html">Features</a></li>
                 <li><a href="templates.html">Templates</a></li>
                 <li><a href="blog.html">Blog</a></li>
             </ul>
             <div class="buttons"><button class="button login" type="button" data-global-search
-                    aria-label="Search study notes">🔍</button><a class="button login" href="login.html">Login</a><a
+                    aria-label="Search study notes">ðŸ”</button><a class="button login" href="login.html">Login</a><a
                     class="button signup" href="signup.html">Get Started</a></div>
         </nav>
     </header>
@@ -32,33 +32,33 @@
         </section>
         <section class="feature-grid feature-page-grid">
             <div class="card feature-card">
-                <div class="feature-icon">📂</div>
+                <div class="feature-icon">ðŸ“‚</div>
                 <h3>Course organization</h3>
                                 <p>Keep lecture notes, syllabus topics, and peer resources organized by university course so every concept is easy to find.
                 </p>
             </div>
             <div class="card feature-card">
-                <div class="feature-icon">🔍</div>
+                <div class="feature-icon">ðŸ”</div>
                 <h3>Instant search</h3>
                 <p>Search shared notes by subject and tags to find the right study resource.</p>
             </div>
             <div class="card feature-card">
-                <div class="feature-icon">✨</div>
+                <div class="feature-icon">âœ¨</div>
                 <h3>AI summaries</h3>
                 <p>AI summaries for lecture decks and readings are planned for a future release. <strong>Coming Soon</strong>.</p>
             </div>
             <div class="card feature-card">
-                <div class="feature-icon">☁️</div>
+                <div class="feature-icon">â˜ï¸</div>
                 <h3>Cloud sync</h3>
                 <p>Sync uploaded study files across devices with the current cloud workflow.</p>
             </div>
             <div class="card feature-card">
-                <div class="feature-icon">🤝</div>
+                <div class="feature-icon">ðŸ¤</div>
                 <h3>Peer study groups</h3>
                                 <p>Share course notes, ask questions, and message classmates with 1-on-1 peer chat.</p>
             </div>
             <div class="card feature-card">
-                <div class="feature-icon">🔒</div>
+                <div class="feature-icon">ðŸ”’</div>
                 <h3>Student-first privacy</h3>
                                 <p>Your study notes and conversations are protected with secure storage and thoughtful privacy controls.</p>
             </div>
@@ -79,10 +79,10 @@
                         class="note-description" rows="2" placeholder="Short description"
                         aria-label="Description"></textarea></div>
                 <div class="upload-dropzone drop-zone" tabindex="0" role="button">
-                    <div class="upload-icon">↑</div>
+                    <div class="upload-icon">â†‘</div>
                     <h3>Drop study files here</h3>
                     <p>or <span class="browse-link">browse from your device</span></p><small>PDF, DOC, DOCX, PPT, PPTX,
-                        JPG, PNG, GIF, WEBP · Free for everyone</small>
+                        JPG, PNG, GIF, WEBP Â· Free for everyone</small>
                 </div>
                 <ul class="file-list"></ul>
                 <div class="upload-status" aria-live="polite"></div><button class="button primary publish-button"
@@ -93,7 +93,7 @@
             <div class="section-heading">
                 <div><span class="eyebrow">Learn together</span>
                     <h2>Community study notes</h2>
-                    <p>Discover resources shared by students and support each other’s learning.</p>
+                    <p>Discover resources shared by students and support each otherâ€™s learning.</p>
                 </div>
             </div>
             <div class="feed-toolbar"><input id="community-search" type="search"
@@ -117,13 +117,13 @@
         <div id="chat-drawer" class="chat-drawer" aria-hidden="true">
             <div class="chat-header">
                 <div><strong>Study chat</strong><span id="chat-partner">Select a note author</span></div><button
-                    type="button" data-close-chat>×</button>
+                    type="button" data-close-chat>Ã—</button>
             </div>
             <div id="conversation-list" class="conversation-list"></div>
             <div id="chat-messages" class="chat-messages">
                 <p class="empty-state">Choose a conversation to start chatting.</p>
             </div>
-            <form id="chat-form" class="chat-form"><input id="chat-input" type="text" placeholder="Write a message…"
+            <form id="chat-form" class="chat-form"><input id="chat-input" type="text" placeholder="Write a messageâ€¦"
                     autocomplete="off"><button class="button primary" type="submit">Send</button></form>
         </div>
         <section class="cta">
@@ -133,7 +133,7 @@
         </section>
     </main>
     <footer>
-        <p>© 2026 SmartNotes. All Rights Reserved.</p>
+        <p>Â© 2026 SmartNotes. All Rights Reserved.</p>
         <div><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="guidelines.html">Guidelines</a><a href="features.html">Features</a><a href="templates.html">Templates</a><a href="blog.html">Blog</a>
         </div>
     </footer>
