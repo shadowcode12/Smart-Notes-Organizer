@@ -196,7 +196,7 @@ The Firebase web configuration contains a public client API key by design; autho
 
 ## Known issues
 
-- The Vercel deploy on `master` is failing until the header fix is merged.
+- The local demo uses the shared security headers in `firebase.json`.
 - The Firestore rules have not yet been tested against the local emulator.
 - Route guards are client-side only and do not replace server-side authorization.
 - Local-mode passwords are stored in plaintext in browser storage.

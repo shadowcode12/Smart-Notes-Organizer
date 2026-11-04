@@ -18,7 +18,7 @@ SmartNotes is a static, multi-page website built with plain HTML, CSS, and brows
 - [Data model](#data-model)
 - [File uploads and storage](#file-uploads-and-storage)
 - [Testing](#testing)
-- [Deployment](#deployment)
+- [Run locally](#run-locally)
 - [Security](#security)
 - [Troubleshooting](#troubleshooting)
 - [Known limitations](#known-limitations)
@@ -84,10 +84,9 @@ Signed-in pages (dashboard, notes, chats) redirect logged-out visitors to the lo
 - HTML5, CSS3, and ES modules. No framework and no bundler.
 - Firebase Authentication and Cloud Firestore, loaded from Google's CDN (`gstatic.com`), version 10.12.2.
 - `localStorage` and IndexedDB for local mode.
-- Vercel for hosting the website.
 - Firebase CLI for deploying Firestore rules.
 - Node.js test runner with `@firebase/rules-unit-testing` for the rules tests.
-- Python with FastAPI for a backend skeleton (see [Project structure](#project-structure)).
+- Python with FastAPI and Backblaze B2 presigned links for the local API.
 
 ## Project structure
 
@@ -104,12 +103,11 @@ smart-notes-organizer/
 │   └── script.js                   Navigation, search, and diagnostics
 ├── tests/
 │   └── firestore.rules.test.js     Firestore rules tests (emulator)
-├── backend/                        Python backend skeleton (not deployed)
+├── backend/                        FastAPI backend
 ├── docs/
 │   └── BACKEND_PLAN.md             Planned backend scope and endpoints
 ├── firestore.rules                 Firestore security rules
 ├── firebase.json                   Firebase config (rules and hosting headers)
-├── vercel.json                     Vercel config (security headers)
 ├── package.json                    npm scripts and dependencies
 └── README.md
 ```
@@ -122,16 +120,11 @@ smart-notes-organizer/
 - A local web server. Opening the HTML files directly (`file://`) blocks the module imports.
 - Node.js 18 or newer, only if you want to run the rules tests.
 
-### Run the site locally
+### Run locally
 
-1. Clone the repository and open its folder.
-2. Start any static web server. For example, with Python:
-
-   ```bash
-   python -m http.server 8000
-   ```
-
-3. Open http://localhost:8000.
+Use the included `run-demo.bat` to start the FastAPI backend on
+http://localhost:8000 and the static frontend on http://localhost:8080. Exact
+setup, environment variables, and the presentation checklist are in [DEMO.md](DEMO.md).
 
 Without a Firebase configuration, the site runs in [local mode](#local-mode).
 
@@ -226,18 +219,6 @@ The test suite covers public and private reads, verified-account requirements, n
 pip install -r backend/requirements.txt
 python -m pytest backend/tests
 ```
-
-## Deployment
-
-The website is a static site and is deployed to Vercel. `vercel.json` sets the Content Security Policy and clickjacking headers for every page.
-
-Deploying the site does not deploy the Firestore rules. Deploy the rules separately whenever they change (see [Firebase setup](#firebase-setup)).
-
-Before a release:
-
-1. Run `npm test` and confirm all rules tests pass.
-2. Confirm the Firestore rules are deployed to the production project.
-3. Test sign-up with email verification, login, Google sign-in, upload, download, chat, and delete on the deployed domain.
 
 ## Security
 
